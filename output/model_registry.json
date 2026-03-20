@@ -1,0 +1,16 @@
+{
+  "versions": [
+    {
+      "version": "lstm-relu-20260319134047",
+      "model_type": "lstm",
+      "activation": "relu",
+      "train_window": "5y",
+      "val_rmse": 0.0,
+      "approved": true,
+      "approved_by": "system",
+      "rollback_version": "",
+      "change_ticket": "AUTO-BOOTSTRAP",
+      "registered_at": "2026-03-19T13:40:47.447856+00:00"
+    }
+  ]
+}

@@ -1,0 +1,2 @@
+ts_utc,event,symbol,side,qty,price,status,reason
+2026-03-19T13:41:09.055235+00:00,RISK_BLOCK,BTCUSD,BUY,0.0961462045000193,69338.8439131295,BLOCKED,Asset exposure limit exceeded for BTCUSD: 66.67%

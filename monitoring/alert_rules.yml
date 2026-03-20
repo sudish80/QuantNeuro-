@@ -1,0 +1,115 @@
+# Prometheus alerting rules for trading model
+
+groups:
+  - name: trading_model_alerts
+    interval: 30s
+    rules:
+      # High drawdown alert
+      - alert: HighDrawdown
+        expr: trading_max_drawdown > 0.2
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High Portfolio Drawdown ({{ $value | humanizePercentage }})"
+          description: "Portfolio drawdown exceeded 20% threshold"
+
+      # Excessive leverage alert
+      - alert: ExcessiveLeverage
+        expr: risk_leverage_ratio > 3.0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Excessive Leverage ({{ $value }}x)"
+          description: "Portfolio leverage exceeded 3x limit - URGENT"
+
+      # Model inference latency alert
+      - alert: HighInferenceLatency
+        expr: histogram_quantile(0.95, rate(model_inference_latency_seconds_bucket[5m])) > 1.0
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High Model Inference Latency ({{ $value }}s)"
+          description: "P95 inference latency exceeded 1 second"
+
+      # Model training loss not improving
+      - alert: TrainingLossNotImproving
+        expr: rate(model_training_loss[5m]) > -0.001
+        for: 30m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Training Loss Plateau"
+          description: "Training loss not improving over last 30 minutes"
+
+      # Data quality degradation
+      - alert: DataQualityDegraded
+        expr: data_quality_score < 0.8
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Data Quality Below Threshold ({{ $value | humanizePercentage }})"
+          description: "Data quality score below 80%"
+
+      # High margin utilization
+      - alert: HighMarginUtilization
+        expr: risk_margin_utilization_ratio > 0.9
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Margin Utilization Critical ({{ $value | humanizePercentage }})"
+          description: "Margin utilization above 90% - position at risk"
+
+      # Win rate degradation
+      - alert: PoorWinRate
+        expr: trading_win_rate < 0.45
+        for: 60m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Win Rate Below Expected ({{ $value | humanizePercentage }})"
+          description: "Trading win rate fell below 45% threshold"
+
+      # No trades in recent period (potential model failure)
+      - alert: NoTradesExecuted
+        expr: rate(trading_trades_executed_total[1h]) == 0
+        for: 2h
+        labels:
+          severity: warning
+        annotations:
+          summary: "No Trades Executed in 2 Hours"
+          description: "Model may have stopped generating signals"
+
+      # GPU memory leak
+      - alert: GPUMemoryLeak
+        expr: system_gpu_memory_used_mb > 10000
+        for: 30m
+        labels:
+          severity: warning
+        annotations:
+          summary: "GPU Memory Leak Detected ({{ $value }}MB)"
+          description: "GPU memory usage anomalously high"
+
+      # High portfolio concentration
+      - alert: SectorConcentrationHigh
+        expr: risk_max_sector_concentration > 0.5
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High Sector Concentration ({{ $value | humanizePercentage }})"
+          description: "Portfolio exposure concentrated in single sector > 50%"
+
+      # Prometheus scrape failure
+      - alert: PrometheusScrapeFailing
+        expr: up{job="trading_model"} == 0
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Prometheus Cannot Scrape Trading Model"
+          description: "Model metrics endpoint not responding"
