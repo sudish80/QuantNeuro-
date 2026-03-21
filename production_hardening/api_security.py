@@ -331,7 +331,7 @@ def require_permission(permission: PermissionType):
     return decorator
 
 
-def require_rate_limit:
+def require_rate_limit():
     """Decorator for rate limit checking."""
 
     def decorator(func: Callable) -> Callable:
