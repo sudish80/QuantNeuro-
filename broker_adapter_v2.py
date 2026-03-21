@@ -525,142 +525,156 @@ class AlpacaAdapter(BrokerAdapter):
 # BINANCE ADAPTER
 # ============================================================================
 
-class BinanceAdapter(BrokerAdapter):
-    """Binance Futures/Spot trading integration"""
+class AlphaVantageAdapter(BrokerAdapter):
+    """AlphaVantage data source integration for real-time and historical market data"""
     
-    def __init__(self, api_key: str, api_secret: str, testnet: bool = False):
-        super().__init__("Binance")
+    def __init__(self, api_key: str):
+        super().__init__("AlphaVantage")
         self.api_key = api_key
-        self.api_secret = api_secret
-        self.testnet = testnet
-        self.base_url = "https://testnet.binancefuture.com" if testnet else "https://fapi.binance.com"
+        self.base_url = "https://www.alphavantage.co/query"
         self.session = None
-        self.orders: Dict[str, Order] = {}
+        self.orders: Dict[str, Order] = {}  # Not used but maintains interface
         self.positions: Dict[str, Position] = {}
+        self.cache: Dict[str, Dict] = {}  # Cache for API responses
     
     async def connect(self):
-        """Connect to Binance API"""
+        """Connect to AlphaVantage API"""
         try:
-            # Real: import aiohttp; setup session with auth headers
-            # self.session = aiohttp.ClientSession(
-            #     headers={
-            #         "X-MBX-APIKEY": self.api_key
-            #     }
-            # )
+            # AlphaVantage: No persistent connection needed, HTTP requests only
             self.connection_status = ConnectionStatus.CONNECTED
-            logger.info(f"Connected to Binance {'Testnet' if self.testnet else 'Live'}")
+            logger.info("Connected to AlphaVantage data service")
         except Exception as e:
             self.connection_status = ConnectionStatus.ERROR
             self.last_error = str(e)
-            logger.error(f"Binance connection failed: {e}")
+            logger.error(f"AlphaVantage connection failed: {e}")
     
     async def disconnect(self):
-        """Disconnect from Binance"""
-        if self.session:
-            # await self.session.close()
-            pass
+        """Disconnect from AlphaVantage"""
         self.connection_status = ConnectionStatus.DISCONNECTED
     
     def get_connection_status(self) -> ConnectionStatus:
         return self.connection_status
     
     def get_account(self) -> Account:
-        """Get account from Binance Futures"""
-        # Real: GET /fapi/v3/account
+        """Data services don't have accounts, return placeholder"""
         return Account(
-            account_id="BINANCE_FUTURES",
-            cash=10000.0,
-            buying_power=10000.0,
-            equity=10000.0,
+            account_id="ALPHAVANTAGE_DATA",
+            cash=0.0,
+            buying_power=0.0,
+            equity=0.0,
             positions_value=0.0,
-            leverage=10.0,
+            leverage=1.0,
             multiplier=1.0
         )
     
     def get_buying_power(self) -> float:
-        return self.get_account().buying_power
+        return 0.0  # Data service only
     
     def get_positions(self) -> List[Position]:
-        """Get open Futures positions"""
-        # Real: GET /fapi/v3/openOrders + /fapi/v3/positionRisk
-        return list(self.positions.values())
+        """AlphaVantage is data-only, no positions"""
+        return []
     
     def get_position(self, symbol: str) -> Optional[Position]:
-        return self.positions.get(symbol)
+        return None
     
     def place_order(self, symbol: str, qty: int, price: float,
                    order_type: OrderType, side: OrderSide,
                    stop_price: Optional[float] = None) -> Order:
-        """Place order on Binance Futures"""
-        order_id = f"BNB_{len(self.orders)}"
-        order = Order(
-            order_id=order_id,
-            symbol=symbol,
-            qty=qty,
-            price=price,
-            order_type=order_type,
-            side=side,
-            stop_price=stop_price,
-            status=OrderStatus.SUBMITTED
-        )
-        self.orders[order_id] = order
-        logger.info(f"Binance order: {order_id} {side.value} {qty} {symbol}")
-        return order
+        """AlphaVantage is data-only, cannot place orders"""
+        raise NotImplementedError("AlphaVantage is a data source, not a trading venue")
     
     def cancel_order(self, order_id: str) -> bool:
-        """Cancel order on Binance"""
-        if order_id in self.orders:
-            self.orders[order_id].status = OrderStatus.CANCELLED
-            logger.info(f"Binance order cancelled: {order_id}")
-            return True
+        """AlphaVantage is data-only"""
         return False
     
     def get_order_status(self, order_id: str) -> OrderStatus:
-        return self.orders.get(order_id, Order(
-            "UNKNOWN", "", 0, 0, OrderType.MARKET, OrderSide.BUY
-        )).status
+        return OrderStatus.REJECTED
     
     def get_orders(self, status: Optional[OrderStatus] = None) -> List[Order]:
-        if status:
-            return [o for o in self.orders.values() if o.status == status]
-        return list(self.orders.values())
+        return []
     
     def get_trades(self) -> List[Trade]:
-        """Get executed trades from Binance"""
-        filled_orders = [o for o in self.orders.values() if o.status == OrderStatus.FILLED]
-        return [
-            Trade(
-                trade_id=f"TRADE_{o.order_id}",
-                order_id=o.order_id,
-                symbol=o.symbol,
-                qty=o.filled_qty,
-                price=o.avg_fill_price,
-                side=o.side,
-                commission=o.commission,
-                executed_at=o.filled_at or datetime.now()
-            )
-            for o in filled_orders
-        ]
+        return []
     
     def get_fills(self, order_id: str) -> List[Dict]:
-        """Get fills for order"""
-        order = self.orders.get(order_id)
-        if not order or order.filled_qty == 0:
-            return []
-        return [{
-            "qty": order.filled_qty,
-            "price": order.avg_fill_price,
-            "commission": order.commission,
-            "timestamp": order.filled_at
-        }]
+        return []
     
     def get_last_price(self, symbol: str) -> float:
-        # Real: GET /fapi/v1/ticker/price?symbol={symbol}
-        return 50000.0  # Placeholder (BTC/USDT)
+        """Get latest price from AlphaVantage Global Quote endpoint"""
+        # Real: GET /query?function=GLOBAL_QUOTE&symbol={symbol}&apikey={api_key}
+        # Response: {"Global Quote": {"05. price": "150.25", ...}}
+        cache_key = f"QUOTE_{symbol}"
+        if cache_key in self.cache:
+            return float(self.cache[cache_key].get("price", 0.0))
+        
+        # Placeholder: would be populated by async data fetch
+        return 150.0
     
     def get_bid_ask(self, symbol: str) -> Tuple[float, float]:
-        # Real: GET /fapi/v1/ticker/bookTicker?symbol={symbol}
-        return (49950.0, 50050.0)  # Placeholder
+        """Get bid/ask from AlphaVantage"""
+        # Note: AlphaVantage Global Quote doesn't return separate bid/ask
+        # This would require separate API call or use of intraday data
+        price = self.get_last_price(symbol)
+        spread = price * 0.001  # Assume 0.1% spread
+        return (price - spread, price + spread)
+    
+    def get_historical_data(self, symbol: str, interval: str = "daily") -> Optional[Dict]:
+        """
+        Get historical time series data
+        
+        Args:
+            symbol: Stock symbol (e.g., "AAPL")
+            interval: "daily", "intraday" (default: daily)
+        
+        Returns:
+            Dict with time series data from AlphaVantage
+        """
+        # Real: GET /query?function=TIME_SERIES_DAILY&symbol={symbol}&apikey={api_key}
+        # Would return: {"Time Series (Daily)": {"2024-03-20": {"1. open": "150.00", ...}, ...}}
+        cache_key = f"TIMESERIES_{symbol}_{interval}"
+        if cache_key in self.cache:
+            return self.cache[cache_key]
+        return None
+    
+    def get_intraday_data(self, symbol: str, interval: str = "5min") -> Optional[Dict]:
+        """
+        Get intraday time series data
+        
+        Args:
+            symbol: Stock symbol
+            interval: "1min", "5min", "15min", "30min", "60min" (default: 5min)
+        
+        Returns:
+            Dict with intraday data
+        """
+        # Real: GET /query?function=TIME_SERIES_INTRADAY&symbol={symbol}&interval={interval}&apikey={api_key}
+        cache_key = f"INTRADAY_{symbol}_{interval}"
+        if cache_key in self.cache:
+            return self.cache[cache_key]
+        return None
+    
+    def get_indicators(self, symbol: str, indicator: str = "SMA") -> Optional[Dict]:
+        """
+        Get technical indicators
+        
+        Args:
+            symbol: Stock symbol
+            indicator: "SMA", "EMA", "RSI", "MACD", "ATR", "ADX", etc.
+        
+        Returns:
+            Dict with indicator values
+        """
+        # Real: GET /query?function={indicator}&symbol={symbol}&interval=daily&apikey={api_key}
+        cache_key = f"INDICATOR_{symbol}_{indicator}"
+        if cache_key in self.cache:
+            return self.cache[cache_key]
+        return None
+    
+    def cache_data(self, symbol: str, data_type: str, data: Dict):
+        """Cache API response to reduce rate limiting"""
+        cache_key = f"{data_type}_{symbol}"
+        self.cache[cache_key] = data
+        logger.debug(f"Cached {cache_key}")
     
     def get_last_error(self) -> Optional[str]:
         return self.last_error
@@ -680,14 +694,14 @@ class CommissionCalculator:
     COMMISSIONS = {
         "interactive_brokers": 0.5,  # 0.5 bps per share
         "alpaca": 0.0,  # Free trading
-        "binance": 4.0,  # 0.04% = 4 bps
+        "alphavantage": 0.0,  # Data-only, no trading
     }
     
     # Average slippage (bps)
     SLIPPAGE = {
         "interactive_brokers": 1.0,
         "alpaca": 2.0,
-        "binance": 1.5,
+        "alphavantage": 0.0,  # Data-only
     }
     
     @staticmethod
@@ -710,8 +724,11 @@ class CommissionCalculator:
             per_share = max(1.0, qty * 0.005)
             percentage = trade_value * 0.001
             return min(per_share, percentage)
+        elif broker == "alphavantage":
+            # AlphaVantage is data-only service
+            return 0.0
         else:
-            # Binance, Alpaca: percentage-based
+            # Alpaca: percentage-based
             return (trade_value * commission_rate) / 10000  # Convert bps to decimal
     
     @staticmethod
@@ -753,7 +770,7 @@ class BrokerFactory:
     _adapters: Dict[str, type] = {
         "interactive_brokers": InteractiveBrokersAdapter,
         "alpaca": AlpacaAdapter,
-        "binance": BinanceAdapter,
+        "alphavantage": AlphaVantageAdapter,
     }
     
     @classmethod
@@ -762,11 +779,11 @@ class BrokerFactory:
         Create broker adapter instance
         
         Args:
-            broker_name: "interactive_brokers", "alpaca", "binance"
+            broker_name: "interactive_brokers", "alpaca", "alphavantage"
             **kwargs: Broker-specific arguments
                 - IB: host, port, client_id
                 - Alpaca: api_key, api_secret, base_url
-                - Binance: api_key, api_secret, testnet
+                - AlphaVantage: api_key
         
         Returns:
             BrokerAdapter subclass instance
@@ -795,7 +812,7 @@ if __name__ == "__main__":
     import asyncio
     
     async def example_usage():
-        # Create adapters for all brokers
+        # Create adapters for all sources
         ib = BrokerFactory.create(
             "interactive_brokers",
             host="127.0.0.1",
@@ -809,11 +826,9 @@ if __name__ == "__main__":
             api_secret="YOUR_SECRET"
         )
         
-        binance = BrokerFactory.create(
-            "binance",
-            api_key="YOUR_KEY",
-            api_secret="YOUR_SECRET",
-            testnet=True
+        alphavantage = BrokerFactory.create(
+            "alphavantage",
+            api_key="YOUR_AV_API_KEY"
         )
         
         # Print initial status
@@ -823,8 +838,8 @@ if __name__ == "__main__":
         print(f"Available brokers: {BrokerFactory.list_brokers()}")
         print()
         
-        # Test each broker
-        for adapter in [ib, alpaca, binance]:
+        # Test each adapter
+        for adapter in [ib, alpaca, alphavantage]:
             print(f"[{adapter.broker_name}] Status: {adapter.get_connection_status().value}")
             account = adapter.get_account()
             print(f"  Account: {account.account_id}")
@@ -841,7 +856,7 @@ if __name__ == "__main__":
         test_cases = [
             ("Stock", 100.0, 100, "interactive_brokers"),
             ("Stock", 100.0, 100, "alpaca"),
-            ("Crypto", 50000.0, 0.01, "binance"),
+            ("Data Feed", 150.0, 1, "alphavantage"),
         ]
         
         for asset, price, qty, broker in test_cases:
@@ -856,7 +871,8 @@ if __name__ == "__main__":
             print(f"  Commission: ${commission:,.4f}")
             print(f"  Slippage: ${slippage:,.4f}")
             print(f"  Total Cost: ${total_cost:,.4f}")
-            print(f"  Cost % of trade: {(total_cost / trade_value) * 100:.4f}%")
+            if trade_value > 0:
+                print(f"  Cost % of trade: {(total_cost / trade_value) * 100:.4f}%")
             print()
     
     asyncio.run(example_usage())
