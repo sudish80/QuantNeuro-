@@ -1,0 +1,23 @@
+{
+  "session_info": {
+    "start_time": "2026-03-21T13:57:07.977642",
+    "end_time": "2026-03-21T13:57:16.754982",
+    "duration_hours": 0.002438155
+  },
+  "performance": {
+    "total_trades": 0,
+    "closed_trades": 0,
+    "open_trades": 0,
+    "wins": 0,
+    "losses": 0,
+    "win_rate": 0.0,
+    "total_pnl": 0.0,
+    "avg_pnl": 0.0,
+    "avg_pnl_pct": 0.0,
+    "sharpe_ratio": 0.0,
+    "max_drawdown": 0.0
+  },
+  "trades": [],
+  "signals": [],
+  "prices": []
+}

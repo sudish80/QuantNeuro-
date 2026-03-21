@@ -1,0 +1,33 @@
+{
+  "session_info": {
+    "start_time": "2026-03-21T14:17:41.003244",
+    "end_time": "2026-03-21T14:17:42.488922",
+    "duration_hours": 0.00041269055555555556
+  },
+  "performance": {
+    "total_trades": 5,
+    "closed_trades": 5,
+    "open_trades": 0,
+    "wins": 4,
+    "losses": 1,
+    "win_rate": 0.8,
+    "total_pnl": 993.3635680134134,
+    "avg_pnl": 198.67271360268268,
+    "avg_pnl_pct": 10.363010272964223,
+    "sharpe_ratio": 9.775300167042493,
+    "max_drawdown": 0.8763712946165657
+  },
+  "trades": [
+    {
+      "trade_id": "TRADE_00001",
+      "symbol": "TSLA",
+      "entry_time": "2026-03-21T14:17:41.669439",
+      "entry_price": 74.24656142299023,
+      "entry_reason": "RSI 28.8 oversold + BB below lower band + volume 1.3x",
+      "exit_time": "2026-03-21T14:17:41.739162",
+      "exit_price": 90.30045150688767,
+      "exit_reason": "RSI 70.2 overbought + BB above upper band + volume 2.3x",
+      "quantity": 26,
+      "pnl": 417.4011421813335,
+      "pnl_pct": 21.622402137166723,
+      "win": 
