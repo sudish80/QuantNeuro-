@@ -1,0 +1,10 @@
+{
+  "avg_rmse": 212.64544677734375,
+  "avg_mape": 80.06036376953125,
+  "avg_r2": -388.92173577607184,
+  "rmse_std": 0.7823944091796875,
+  "rmse_std_ratio": 0.0036793377005570923,
+  "overfit_flag": false,
+  "regime_shift": 1.564788818359375,
+  "production_ready": false
+}
