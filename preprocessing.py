@@ -122,10 +122,30 @@ def apply_normalization(data: np.ndarray, params: dict) -> np.ndarray:
 
 
 def inverse_transform_close(values: np.ndarray, close_stats: dict) -> np.ndarray:
-    """Inverse-transform normalized close values back to price scale."""
+    """
+    Inverse-transform normalized close values back to price scale.
+    
+    Supports both old format: {"mode": str, "min": float, "max": float, ...}
+    And new format: {"mode": str, "params": dict with mins/maxs or means/stds}
+    """
     if close_stats["mode"] == "minmax":
-        return values * (close_stats["max"] - close_stats["min"]) + close_stats["min"]
-    return values * close_stats["std"] + close_stats["mean"]
+        if "params" in close_stats:
+            # New format with full scaler_params
+            min_val = close_stats["params"]["mins"][-1]  # Close is last in available features
+            max_val = close_stats["params"]["maxs"][-1]
+        else:
+            # Old format
+            min_val = close_stats["min"]
+            max_val = close_stats["max"]
+        return values * (max_val - min_val) + min_val
+    else:  # zscore
+        if "params" in close_stats:
+            mean_val = close_stats["params"]["means"][-1]
+            std_val = close_stats["params"]["stds"][-1]
+        else:
+            mean_val = close_stats["mean"]
+            std_val = close_stats["std"]
+        return values * std_val + mean_val
 
 
 def create_windows(

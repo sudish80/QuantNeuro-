@@ -38,9 +38,11 @@ class AsyncDataFetcher:
 
     async def fetch_ticker_data(
         self, ticker: str, period: str = "1y", interval: str = "1d"
-    ) -> pd.DataFrame:
+    ) -> Optional[pd.DataFrame]:
         """
-        Fetch historical ticker data asynchronously (with semaphore to limit concurrency).
+        FIX #6: Fetch historical ticker data with per-task timeout.
+        
+        Prevents one slow/hanging request from blocking the entire batch.
 
         Args:
             ticker: Stock/crypto symbol (e.g., "AAPL", "BTC-USD")
@@ -48,37 +50,90 @@ class AsyncDataFetcher:
             interval: Bar interval ("1d", "1h", "15m", etc.)
 
         Returns:
-            DataFrame with OHLCV data
+            DataFrame with OHLCV data or None if timeout
         """
         async with self._semaphore:
             try:
                 loop = asyncio.get_event_loop()
-                # Run blocking yfinance call in thread pool to avoid blocking
-                data = await loop.run_in_executor(
-                    None,
-                    lambda: yf.download(ticker, period=period, interval=interval, progress=False),
+                # Add timeout for individual ticker fetch
+                data = await asyncio.wait_for(
+                    loop.run_in_executor(
+                        None,
+                        lambda: yf.download(ticker, period=period, interval=interval, progress=False),
+                    ),
+                    timeout=self.timeout  # Per-task timeout
                 )
                 return data
+            except asyncio.TimeoutError:
+                print(f"Timeout fetching {ticker} (>{self.timeout}s)")
+                return None
             except Exception as e:
                 print(f"Error fetching {ticker}: {e}")
-                return pd.DataFrame()
+                return None
 
     async def fetch_multiple_tickers(
-        self, tickers: List[str], period: str = "1y"
+        self, tickers: List[str], period: str = "1y", use_cache: Optional[Dict] = None
     ) -> Dict[str, pd.DataFrame]:
         """
-        Fetch data for multiple tickers concurrently.
+        FIX #6: Fetch data for multiple tickers with timeout and fallback.
 
         Much faster than sequential fetching.
+        Handles timeouts gracefully by using cache if available.
 
         Example:
             tickers = ["AAPL", "GOOGL", "MSFT", "TSLA", "AMZN"]
             data = await fetcher.fetch_multiple_tickers(tickers)
             # Returns: {"AAPL": df, "GOOGL": df, ...}
+            # If timeout: returns cached data instead of blocking
         """
-        tasks = [self.fetch_ticker_data(ticker, period=period) for ticker in tickers]
-        results = await asyncio.gather(*tasks)
-        return {ticker: data for ticker, data in zip(tickers, results)}
+        use_cache = use_cache or {}
+        results = {}
+        
+        # Create tasks with individual timeouts
+        tasks = {
+            ticker: asyncio.create_task(self.fetch_ticker_data(ticker, period=period))
+            for ticker in tickers
+        }
+        
+        # Wait for all tasks with overall timeout
+        overall_timeout = self.timeout * len(tickers) / self.max_concurrent
+        try:
+            completed, pending = await asyncio.wait(
+                tasks.values(),
+                timeout=overall_timeout,
+                return_when=asyncio.ALL_COMPLETED
+            )
+            
+            # Cancel any still-pending tasks
+            for task in pending:
+                task.cancel()
+                
+        except Exception as e:
+            print(f"Batch fetch error: {e}")
+        
+        # Collect results, using cache for failed/timed-out requests
+        for ticker, task in tasks.items():
+            try:
+                data = task.result() if task.done() else None
+                if data is not None and len(data) > 0:
+                    results[ticker] = data
+                elif ticker in use_cache:
+                    print(f"Using cached data for {ticker}")
+                    results[ticker] = use_cache[ticker]
+                else:
+                    results[ticker] = pd.DataFrame()
+            except (asyncio.CancelledError, asyncio.TimeoutError):
+                if ticker in use_cache:
+                    print(f"Request for {ticker} timed out, using cache")
+                    results[ticker] = use_cache[ticker]
+                else:
+                    print(f"Request for {ticker} timed out, no cache available")
+                    results[ticker] = pd.DataFrame()
+            except Exception as e:
+                print(f"Error collecting {ticker}: {e}")
+                results[ticker] = pd.DataFrame()
+        
+        return results
 
     async def fetch_intraday_batch(
         self, tickers: List[str], interval: str = "5m"
@@ -121,10 +176,52 @@ class AsyncAPIClient:
                     else:
                         raise Exception(f"API error: {response.status}")
 
-    async def fetch_multiple_urls(self, urls: List[str]) -> List[Dict]:
-        """Fetch multiple URLs concurrently."""
-        tasks = [self.fetch_json(url) for url in urls]
-        return await asyncio.gather(*tasks, return_exceptions=True)
+    async def fetch_multiple_urls(self, urls: List[str], return_on_first_timeout: bool = False) -> List:
+        """
+        FIX #6: Fetch multiple URLs concurrently with timeout handling.
+        
+        Args:
+            urls: List of API URLs
+            return_on_first_timeout: If True, return immediately on first timeout
+                                       If False, continue with other requests
+        
+        Returns:
+            List of responses (exceptions included if return_exceptions=True)
+        """
+        tasks = [
+            asyncio.create_task(self.fetch_json(url))
+            for url in urls
+        ]
+        
+        try:
+            # Use asyncio.wait for better control over timeouts
+            done, pending = await asyncio.wait(
+                tasks,
+                timeout=self.timeout.total,
+                return_when=asyncio.ALL_COMPLETED if not return_on_first_timeout else asyncio.FIRST_EXCEPTION
+            )
+            
+            # Cancel remaining pending tasks
+            for task in pending:
+                task.cancel()
+            
+            # Collect results
+            results = []
+            for task in tasks:
+                try:
+                    if task.done():
+                        results.append(task.result())
+                    else:
+                        results.append(TimeoutError(f"Request timed out"))
+                except Exception as e:
+                    results.append(e)
+            
+            return results
+        
+        except Exception as e:
+            print(f"Batch URL fetch error: {e}")
+            # Return empty results for all on critical failure
+            return [None] * len(urls)
 
     async def post_json(self, url: str, data: Dict, headers: Optional[Dict] = None) -> Dict:
         """

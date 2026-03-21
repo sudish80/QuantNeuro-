@@ -12,17 +12,79 @@ import requests
 
 def generate_signals(actuals: np.ndarray, predictions: np.ndarray, threshold: float = 0.0) -> np.ndarray:
     """
-    Generate long/flat/short signals from predicted movement.
-
-    1: buy/long, -1: sell/short, 0: hold.
+    FIX #3: Generate signals based on RETURNS, not prices.
+    
+    CORRECTED approach: Compare predicted returns vs actual returns
+    to generate trading signals.
+    
+    Args:
+        actuals: Actual prices (or returns)
+        predictions: Predicted prices (or returns)
+        threshold: Signal threshold
+    
+    Returns:
+        signals: 1 (buy), -1 (sell), 0 (hold)
+    
+    NOTE: If input is prices, convert to returns first.
+    This assumes prices are roughly log-normal (0-$1000 range).
     """
     if len(actuals) != len(predictions):
         raise ValueError("actuals and predictions must have the same length")
+    
+    # Check if inputs are prices or returns
+    # Heuristic: if values > 1 and differences are small, likely prices
+    actual_mean = np.mean(np.abs(actuals))
+    actual_max_diff = np.max(np.diff(actuals))
+    
+    is_price = actual_mean > 1.0 and actual_max_diff < actual_mean * 0.1
+    
+    if is_price:
+        # Convert prices to returns
+        actual_returns = np.diff(actuals) / (actuals[:-1] + 1e-12)
+        predicted_returns = np.diff(predictions) / (predictions[:-1] + 1e-12)
+        
+        # Signals based on return comparison
+        signals = np.zeros(len(actuals) - 1, dtype=np.int8)  # One fewer sample
+        return_delta = predicted_returns - actual_returns
+    else:
+        # Already returns
+        signals = np.zeros(len(actuals), dtype=np.int8)
+        return_delta = predictions - actuals
+    
+    # Generate signals based on return advantage
+    signals[return_delta > threshold] = 1   # Buy if predicted return > actual
+    signals[return_delta < -threshold] = -1  # Sell if predicted return < actual
+    
+    return signals
 
-    signals = np.zeros(len(actuals), dtype=np.int8)
-    delta = predictions - actuals
-    signals[delta > threshold] = 1
-    signals[delta < -threshold] = -1
+
+def generate_signals_return_based(prices: np.ndarray, predicted_returns: np.ndarray,
+                                 actual_returns: np.ndarray, threshold: float = 0.0) -> np.ndarray:
+    """
+    PREFERRED METHOD: Generate signals when model predicts RETURNS directly.
+    
+    This is semantically correct: model predicts future returns, we trade on that.
+    
+    Args:
+        prices: Historical prices (for reference)
+        predicted_returns: Predicted returns from model
+        actual_returns: Realized returns
+        threshold: Signal threshold for return advantage
+    
+    Returns:
+        signals: 1 (buy if pred_return > threshold), -1 (sell if pred_return < -threshold), 0 (hold)
+    """
+    if len(predicted_returns) != len(actual_returns):
+        raise ValueError("predicted_returns and actual_returns must have the same length")
+    
+    signals = np.zeros(len(predicted_returns), dtype=np.int8)
+    
+    # Signal based on predicted return magnitude
+    # BUY: predicted return > threshold (e.g., > 0.5% expected gain)
+    # SELL: predicted return < -threshold (e.g., < -0.5% expected loss)
+    signals[predicted_returns > threshold] = 1
+    signals[predicted_returns < -threshold] = -1
+    
     return signals
 
 

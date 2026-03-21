@@ -9,7 +9,16 @@ import torch
 
 from data_fetcher import fetch_data
 from models import build_model
-from preprocessing import prepare_dataset, inverse_transform_close
+from preprocessing import (
+    prepare_dataset,
+    inverse_transform_close,
+    add_technical_indicators,
+    impute_missing_values,
+    clip_outliers_iqr,
+    normalize_features,
+    apply_normalization,
+    FEATURE_COLUMNS,
+)
 from trainer import train_model
 from predict_visualize import predict, compute_metrics
 
@@ -63,13 +72,40 @@ def run_walk_forward(
     enforce_thresholds: bool = False,
     summary_path: str | None = None,
 ):
+    """
+    CORRECTED Walk-forward validation with per-fold scaler re-fitting.
+    
+    FIX for data leakage: Each fold gets its own scaler, fit on THAT fold's
+    training data only. This prevents look-ahead bias from the original 80/20 split.
+    """
     df = fetch_data(ticker=ticker, source=source, period=period, interval=interval)
-    processed = prepare_dataset(df, lookback=lookback, normalization=normalization)
+    
+    # Step 1: Prepare data to windowed format WITHOUT global scaling
+    enriched = add_technical_indicators(df)
+    enriched = impute_missing_values(enriched)
+    enriched = clip_outliers_iqr(enriched, ["Close", "Volume", "Returns", "Log_Returns"])
+    enriched = enriched.dropna().copy()
+    
+    feature_cols = FEATURE_COLUMNS
+    available = [c for c in feature_cols if c in enriched.columns]
+    if "Close" not in available:
+        raise ValueError("'Close' must exist in feature columns")
+    
+    data_raw = enriched[available].values.astype(np.float64)  # Raw, unscaled
+    close_idx = available.index("Close")
+    
+    # Step 2: Create raw windows (don't scale yet!)
+    X_all_raw = []
+    y_all_raw = []
+    for i in range(lookback, len(data_raw)):
+        X_all_raw.append(data_raw[i - lookback : i])
+        y_all_raw.append(data_raw[i, close_idx])
+    
+    X_all_raw = np.array(X_all_raw, dtype=np.float32)
+    y_all_raw = np.array(y_all_raw, dtype=np.float32)
 
-    X_all = np.concatenate([processed["X_train"], processed["X_test"]], axis=0)
-    y_all = np.concatenate([processed["y_train"], processed["y_test"]], axis=0)
-
-    n = len(X_all)
+    
+    n = len(X_all_raw)
     train_size = max(min_train_size, int(train_ratio * n))
     test_size = max(min_test_size, int(test_ratio * n))
     step = max(min_step_size, int(step_ratio * n))
@@ -78,16 +114,49 @@ def run_walk_forward(
     fold_metrics = []
 
     for idx, (s, t, u) in enumerate(walk_forward_splits(n, train_size, test_size, step), start=1):
-        X_train, y_train = X_all[s:t], y_all[s:t]
-        X_test, y_test = X_all[t:u], y_all[t:u]
-
+        # FIX #1: Extract raw WINDOWS (not yet scaled)
+        X_train_raw = X_all_raw[s:t]  # Raw windows
+        y_train_raw = y_all_raw[s:t]
+        X_test_raw = X_all_raw[t:u]   # Raw windows
+        y_test_raw = y_all_raw[t:u]
+        
+        # FIX #2: FIT SCALER on THIS fold's training data ONLY
+        # Get 2D array: (n_samples * lookback, n_features)
+        X_train_flat = X_train_raw.reshape(-1, X_train_raw.shape[-1])
+        _, scaler_params = normalize_features(X_train_flat, mode=normalization)
+        
+        # FIX #3: SCALE train and test X with fold-specific scaler
+        X_train = apply_normalization(X_train_flat, scaler_params).reshape(X_train_raw.shape)
+        X_test_flat = X_test_raw.reshape(-1, X_test_raw.shape[-1])
+        X_test = apply_normalization(X_test_flat, scaler_params).reshape(X_test_raw.shape)
+        
+        # FIX #4: SCALE y values (close prices) using close column scaler
+        close_col_idx = close_idx  # Index of Close in features
+        if normalization == "minmax":
+            y_train_min = scaler_params["mins"][close_col_idx]
+            y_train_max = scaler_params["maxs"][close_col_idx]
+            y_train = (y_train_raw - y_train_min) / (y_train_max - y_train_min + 1e-12)
+            y_test = (y_test_raw - y_train_min) / (y_train_max - y_train_min + 1e-12)
+        else:  # zscore
+            y_train_mean = scaler_params["means"][close_col_idx]
+            y_train_std = scaler_params["stds"][close_col_idx]
+            y_train = (y_train_raw - y_train_mean) / (y_train_std + 1e-12)
+            y_test = (y_test_raw - y_train_mean) / (y_train_std + 1e-12)
+        
+        # Store scaler for inverse transform later
+        close_scaler_fold = {
+            "mode": normalization,
+            "params": scaler_params
+        }
+        
+        # Train model on fold-specific scaled data
         model = build_model(model_type=model_type, lookback=lookback, n_features=X_train.shape[2], device=device, activation=activation)
         train_model(
             model=model,
             X_train=X_train,
-            y_train=y_train,
+            y_train=y_train_raw,
             X_test=X_test,
-            y_test=y_test,
+            y_test=y_test_raw,
             device=device,
             epochs=epochs,
             batch_size=64,
@@ -97,8 +166,10 @@ def run_walk_forward(
         )
 
         pred_scaled = predict(model, X_test, device)
-        pred = inverse_transform_close(pred_scaled, processed["close_scaler"])
-        actual = inverse_transform_close(y_test, processed["close_scaler"])
+        
+        # FIX #4: Inverse transform using fold-specific scaler
+        pred = inverse_transform_close(pred_scaled, close_scaler_fold)
+        actual = y_test_raw  # Already in original price space
 
         m = compute_metrics(actual, pred)
 
